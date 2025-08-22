@@ -1,16 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Star, Zap, Download, Gauge } from 'lucide-react';
+import { motion, useAnimation, AnimatePresence } from 'framer-motion';
+import { Howl } from 'howler';
 
-const iconMap = {
-  Star: Star,
-  Zap: Zap,
-  Download: Download,
-  Gauge: Gauge,
-};
-
+const iconMap = { Star, Zap, Download, Gauge };
 const apiBase = process.env.REACT_APP_BACKEND_URL || import.meta.env.REACT_APP_BACKEND_URL;
 
-// Default fallback data to show if API is unavailable or slow
+// Fallback data
 const defaultMetrics = {
   id: 'fallback',
   updated_at: new Date().toISOString(),
@@ -32,16 +28,37 @@ function parseNumeric(targetStr) {
   const suffix = match[2] || '';
   return { n: isNaN(num) ? 0 : num, decimals, suffix };
 }
+
 function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
 
-function useCountUp(targetStr, opts) {
-  const { duration = 2000, start = false, delay = 0 } = opts || {};
+// Soft tick sound using Howler (low volume)
+const useTickSound = () => {
+  const soundRef = useRef(null);
+  useEffect(() => {
+    soundRef.current = new Howl({
+      src: [
+        // Small inline beep base64 fallback if network blocked (1kHz 50ms)
+        'data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAAAEsAAACAAACAAAA//8AAP///wD///8A////AP///wD///8A////AP///wD///8A',
+      ],
+      volume: 0.06,
+      preload: true,
+      html5: true,
+    });
+    return () => { try { soundRef.current?.unload(); } catch (_) {} };
+  }, []);
+  return () => { try { soundRef.current?.play(); } catch (_) {} };
+};
+
+// Count up hook that can call a callback each increment (for sound)
+function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTick } = {}) {
   const [{ text }, setState] = useState(() => ({ text: targetStr }));
   const rafRef = useRef();
+  const lastIntRef = useRef(-1);
 
   useEffect(() => {
     if (!start) {
       setState({ text: targetStr });
+      lastIntRef.current = -1;
       return;
     }
 
@@ -55,62 +72,140 @@ function useCountUp(targetStr, opts) {
       }
       const t = Math.min(1, (now - startTime) / duration);
       const eased = easeOutQuad(t);
-      const current = (n * eased);
+      const current = n * eased;
+
+      // For tick sound on integer boundaries only when decimals=0
+      if (decimals === 0) {
+        const curInt = Math.round(current);
+        if (curInt !== lastIntRef.current) {
+          lastIntRef.current = curInt;
+          onTick && onTick();
+        }
+      } else {
+        // For decimals, tick at ~20Hz max
+        if (onTick && Math.random() < 0.06) onTick();
+      }
+
       const formatted = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
       setState({ text: `${formatted}${suffix}` });
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(step);
-      }
+      if (t < 1) rafRef.current = requestAnimationFrame(step);
     };
 
     rafRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [targetStr, duration, start, delay]);
+  }, [targetStr, duration, start, delay, onTick]);
 
   return text;
 }
 
-// ---- Card component so hooks aren't conditional in parent ----
+// Card component with Framer Motion timeline syncing
 const MetricCard = ({ item, idx, visible }) => {
   const Icon = iconMap[item.icon] || Star;
   const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const showText = useCountUp(item.value, { duration: 2000, start: visible && !prefersReduced, delay: idx * 200 });
+
+  // Framer Motion controls
+  const cardCtrl = useAnimation();
+  const iconCtrl = useAnimation();
+  const glowCtrl = useAnimation();
+
+  const playTick = useTickSound();
+
+  // Number should start only after card + icon finished
+  const [readyToCount, setReadyToCount] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      if (!visible || prefersReduced) {
+        setReadyToCount(true);
+        return;
+      }
+      // Card entrance: slide up + fade in (stagger by idx)
+      await cardCtrl.start({
+        opacity: [0, 1],
+        y: [16, 0],
+        scale: [0.96, 1],
+        transition: { duration: 0.5, ease: 'easeOut', delay: idx * 0.2 },
+      });
+      // Icon pop: zoom-in + bounce
+      await iconCtrl.start({
+        scale: [0, 1.15, 1],
+        rotate: [0, 2, 0],
+        transition: { duration: 0.4, ease: 'easeOut' },
+      });
+      // Glow pulse across the card
+      await glowCtrl.start({
+        boxShadow: [
+          '0 0 0 rgba(214,182,97,0)',
+          '0 10px 28px rgba(214,182,97,0.28)',
+          '0 0 0 rgba(214,182,97,0)',
+        ],
+        transition: { duration: 0.9, ease: 'easeInOut' },
+      });
+      if (mounted) setReadyToCount(true);
+    };
+    run();
+    return () => { mounted = false; };
+  }, [visible, idx, prefersReduced, cardCtrl, iconCtrl, glowCtrl]);
+
+  const countText = useCountUp(item.value, {
+    duration: 2000,
+    start: readyToCount && !prefersReduced,
+    delay: 0,
+    onTick: playTick,
+  });
+
+  // Animated number scaling while counting (simple pulse when ready)
+  const numberVariants = {
+    initial: { scale: 1 },
+    counting: { scale: [1, 1.06, 1], transition: { repeat: Infinity, repeatDelay: 0.2, duration: 0.6 } },
+  };
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 16, scale: 0.96 }}
+      animate={cardCtrl}
       className={[
-        'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center will-change-transform will-change-opacity',
-        visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95',
+        'group rounded-2xl border bg-white/70 backdrop-blur px-2 py-3 sm:px-3 sm:py-4 text-center',
         'hover:scale-[1.02] hover:shadow-[0_10px_28px_rgba(214,182,97,0.25)] hover:border-yellow-300/60',
+        'will-change-transform will-change-opacity',
       ].join(' ')}
-      style={{ transitionDelay: `${idx * 200}ms` }}
       role="figure"
       aria-label={`${item.label}: ${item.value}`}
+      style={{ overflow: 'hidden' }}
+      animate={glowCtrl}
     >
-      <div
-        className={[
-          'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
-          'bg-gradient-to-br from-yellow-400 to-orange-500',
-          visible ? 'tm-pulse-soft' : '',
-        ].join(' ')}
-        style={{ animationDelay: `${idx * 200 + 600}ms` }}
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={iconCtrl}
+        className="mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-yellow-400 to-orange-500"
       >
         <Icon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
-      </div>
-      <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate" dir="ltr">
-        {showText}
-      </div>
+      </motion.div>
+
+      <AnimatePresence>
+        <motion.div
+          variants={numberVariants}
+          initial="initial"
+          animate={readyToCount && !prefersReduced ? 'counting' : 'initial'}
+          className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate"
+          dir="ltr"
+        >
+          {readyToCount ? countText : item.value}
+        </motion.div>
+      </AnimatePresence>
+
       <div className="text-[0.62rem] sm:text-sm text-gray-600 mt-0.5 sm:mt-1 truncate">
         {item.label}
       </div>
-    </div>
+    </motion.div>
   );
 };
 
 const TrustMetrics = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [visible, setVisible] = useState(false); // entrance animation flag
+  const [visible, setVisible] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -134,28 +229,15 @@ const TrustMetrics = () => {
     fetchMetrics();
   }, []);
 
-  // Reveal on entering viewport (mobile-first)
+  // Visibility observer
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) {
-      setVisible(true);
-      return;
-    }
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setVisible(true);
-            io.disconnect();
-          }
-        });
-      },
-      { threshold: 0.2 }
-    );
+    if (prefersReduced) { setVisible(true); return; }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => { if (entry.isIntersecting) { setVisible(true); io.disconnect(); } });
+    }, { threshold: 0.2 });
     io.observe(el);
     return () => io.disconnect();
   }, []);
