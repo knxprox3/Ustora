@@ -52,6 +52,17 @@ module.exports = {
   				'3': 'hsl(var(--chart-3))',
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
+  			},
+  			// Brand colors - Yellow/Orange/Gray only
+  			brand: {
+  				yellow: '#D6B661',
+  				orange: '#E8A317',
+  				'orange-light': '#FFA726',
+  				'orange-dark': '#FF7043',
+  				'gray-light': '#F5F5F5',
+  				gray: '#6E6E6E',
+  				'gray-dark': '#2F2F2F',
+  				bg: '#FAF8F5'
   			}
   		},
   		keyframes: {
