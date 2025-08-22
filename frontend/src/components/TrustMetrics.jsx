@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Star, Zap, Download, Gauge } from 'lucide-react';
 import { motion, useAnimation, AnimatePresence } from 'framer-motion';
 import { Howl } from 'howler';
@@ -61,22 +61,30 @@ const useTickSound = () => {
     });
     return () => { try { soundRef.current?.unload(); } catch (_) {} };
   }, []);
-  return () => { try { soundRef.current?.play(); } catch (_) {} };
+  // Stable callback so downstream effects don't restart
+  return useCallback(() => { try { soundRef.current?.play(); } catch (_) {} }, []);
 };
 
-// Count up hook that can call a callback each increment (for sound)
+// Count up hook that runs once when start flips to true; stable across renders
 function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTick, allowSound = true } = {}) {
   const initialText = buildZeroTextFor(targetStr);
   const [{ text }, setState] = useState(() => ({ text: initialText }));
   const rafRef = useRef();
   const lastIntRef = useRef(-1);
+  const startedRef = useRef(false);
+
+  // keep refs stable for tick and sound flags
+  const onTickRef = useRef(onTick);
+  const allowSoundRef = useRef(allowSound);
+  useEffect(() => { onTickRef.current = onTick; }, [onTick]);
+  useEffect(() => { allowSoundRef.current = allowSound; }, [allowSound]);
 
   useEffect(() => {
-    if (!start) {
-      setState({ text: initialText });
-      lastIntRef.current = -1;
+    if (!start || startedRef.current) {
+      // don't reset text if start goes false later; never regress to 0
       return;
     }
+    startedRef.current = true;
 
     const { n, decimals, suffix } = parseNumeric(targetStr);
     const startTime = performance.now() + delay;
@@ -92,12 +100,12 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
 
       if (decimals === 0) {
         const curInt = Math.round(current);
-        if (allowSound && curInt !== lastIntRef.current) {
+        if (allowSoundRef.current && curInt !== lastIntRef.current) {
           lastIntRef.current = curInt;
-          onTick && onTick();
+          onTickRef.current && onTickRef.current();
         }
       } else {
-        if (allowSound && Math.random() < 0.06) onTick && onTick();
+        if (allowSoundRef.current && Math.random() < 0.06) onTickRef.current && onTickRef.current();
       }
 
       const numText = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
@@ -108,7 +116,7 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
 
     rafRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [targetStr, duration, start, delay, onTick, allowSound, initialText]);
+  }, [targetStr, duration, start, delay, initialText]);
 
   return text;
 }
@@ -149,7 +157,7 @@ const MetricCard = ({ item, idx, visible }) => {
   }, [visible, allowMotion, idx, cardCtrl, iconCtrl]);
 
   const countText = useCountUp(item.value, {
-    duration: 2000,
+    duration: 2500, // أبطأ قليلاً لوضوح التغيير
     start: readyToCount, // العد يعمل دائمًا بعد الظهور، حتى مع تقليل الحركة (لكن بدون صوت/نبض)
     delay: 0,
     onTick: playTick,
