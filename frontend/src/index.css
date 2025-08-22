@@ -110,3 +110,10 @@ code {
     @apply bg-background text-foreground;
     }
 }
+
+/* ---- TrustMetrics animations ---- */
+@keyframes tm-pulse-soft {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+.tm-pulse-soft { animation: tm-pulse-soft 2.6s ease-in-out infinite; }

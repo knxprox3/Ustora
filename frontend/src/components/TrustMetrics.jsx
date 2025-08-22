@@ -22,6 +22,53 @@ const defaultMetrics = {
   ],
 };
 
+// Parse string like "85K+", "120K+", "4.9/5", "1.2s" to numeric + suffix
+function parseNumeric(targetStr) {
+  if (!targetStr || typeof targetStr !== 'string') return { n: 0, decimals: 0, suffix: '' };
+  const match = targetStr.trim().match(/^([0-9]+(?:\.[0-9]+)?)(.*)$/);
+  if (!match) return { n: 0, decimals: 0, suffix: targetStr };
+  const num = parseFloat(match[1]);
+  const decimals = (match[1].split('.')[1] || '').length;
+  const suffix = match[2] || '';
+  return { n: isNaN(num) ? 0 : num, decimals, suffix };
+}
+
+function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
+
+function useCountUp(targetStr, opts) {
+  const { duration = 2000, start = false, delay = 0 } = opts || {};
+  const [{ text }, setState] = useState(() => ({ text: targetStr }));
+  const rafRef = useRef();
+
+  useEffect(() => {
+    if (!start) return; // wait until visible
+
+    const { n, decimals, suffix } = parseNumeric(targetStr);
+    const startTime = performance.now() + delay;
+
+    const step = (now) => {
+      if (now < startTime) {
+        rafRef.current = requestAnimationFrame(step);
+        return;
+      }
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = easeOutQuad(t);
+      const current = (n * eased);
+      // Keep the same decimals format as target
+      const formatted = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
+      setState({ text: `${formatted}${suffix}` });
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(step);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [targetStr, duration, start, delay]);
+
+  return text;
+}
+
 const TrustMetrics = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,7 +101,6 @@ const TrustMetrics = () => {
     const el = containerRef.current;
     if (!el) return;
 
-    // Respect reduced motion users
     const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced) {
       setVisible(true);
@@ -95,29 +141,35 @@ const TrustMetrics = () => {
       <div className="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
         {items.map((item, idx) => {
           const Icon = iconMap[item.icon] || Star;
+          const showText = useCountUp(item.value, { duration: 2000, start: visible, delay: idx * 200 });
           return (
             <div
               key={idx}
               className={[
-                'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center',
-                visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4',
+                // base
+                'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center will-change-transform will-change-opacity',
+                // entrance fade + pop
+                visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95',
+                // hover scale & glow (desktop)
+                'hover:scale-[1.02] hover:shadow-[0_10px_28px_rgba(214,182,97,0.25)] hover:border-yellow-300/60',
               ].join(' ')}
-              style={{ transitionDelay: `${idx * 120}ms` }}
+              style={{ transitionDelay: `${idx * 200}ms` }}
               role="figure"
               aria-label={`${item.label}: ${item.value}`}
             >
-              <div className={[
-                'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
-                'bg-gradient-to-br from-yellow-400 to-orange-500',
-                'transform transition-transform duration-500 ease-out',
-                visible ? 'scale-100' : 'scale-90',
-              ].join(' ')}
-                style={{ transitionDelay: `${idx * 120 + 80}ms` }}
+              <div
+                className={[
+                  'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
+                  'bg-gradient-to-br from-yellow-400 to-orange-500',
+                  // icon pulse loop
+                  visible ? 'tm-pulse-soft' : '',
+                ].join(' ')}
+                style={{ animationDelay: `${idx * 200 + 600}ms` }}
               >
                 <Icon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
               </div>
-              <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate">
-                {item.value}
+              <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate" dir="ltr">
+                {showText}
               </div>
               <div className="text-[0.62rem] sm:text-sm text-gray-600 mt-0.5 sm:mt-1 truncate">
                 {item.label}
