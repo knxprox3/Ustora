@@ -22,7 +22,7 @@ const defaultMetrics = {
   ],
 };
 
-// Parse string like "85K+", "120K+", "4.9/5", "1.2s" to numeric + suffix
+// ---- Helpers for Count Up ----
 function parseNumeric(targetStr) {
   if (!targetStr || typeof targetStr !== 'string') return { n: 0, decimals: 0, suffix: '' };
   const match = targetStr.trim().match(/^([0-9]+(?:\.[0-9]+)?)(.*)$/);
@@ -32,7 +32,6 @@ function parseNumeric(targetStr) {
   const suffix = match[2] || '';
   return { n: isNaN(num) ? 0 : num, decimals, suffix };
 }
-
 function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
 
 function useCountUp(targetStr, opts) {
@@ -41,7 +40,10 @@ function useCountUp(targetStr, opts) {
   const rafRef = useRef();
 
   useEffect(() => {
-    if (!start) return; // wait until visible
+    if (!start) {
+      setState({ text: targetStr });
+      return;
+    }
 
     const { n, decimals, suffix } = parseNumeric(targetStr);
     const startTime = performance.now() + delay;
@@ -54,7 +56,6 @@ function useCountUp(targetStr, opts) {
       const t = Math.min(1, (now - startTime) / duration);
       const eased = easeOutQuad(t);
       const current = (n * eased);
-      // Keep the same decimals format as target
       const formatted = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
       setState({ text: `${formatted}${suffix}` });
       if (t < 1) {
@@ -69,6 +70,43 @@ function useCountUp(targetStr, opts) {
   return text;
 }
 
+// ---- Card component so hooks aren't conditional in parent ----
+const MetricCard = ({ item, idx, visible }) => {
+  const Icon = iconMap[item.icon] || Star;
+  const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const showText = useCountUp(item.value, { duration: 2000, start: visible && !prefersReduced, delay: idx * 200 });
+
+  return (
+    <div
+      className={[
+        'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center will-change-transform will-change-opacity',
+        visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95',
+        'hover:scale-[1.02] hover:shadow-[0_10px_28px_rgba(214,182,97,0.25)] hover:border-yellow-300/60',
+      ].join(' ')}
+      style={{ transitionDelay: `${idx * 200}ms` }}
+      role="figure"
+      aria-label={`${item.label}: ${item.value}`}
+    >
+      <div
+        className={[
+          'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
+          'bg-gradient-to-br from-yellow-400 to-orange-500',
+          visible ? 'tm-pulse-soft' : '',
+        ].join(' ')}
+        style={{ animationDelay: `${idx * 200 + 600}ms` }}
+      >
+        <Icon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
+      </div>
+      <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate" dir="ltr">
+        {showText}
+      </div>
+      <div className="text-[0.62rem] sm:text-sm text-gray-600 mt-0.5 sm:mt-1 truncate">
+        {item.label}
+      </div>
+    </div>
+  );
+};
+
 const TrustMetrics = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -78,7 +116,7 @@ const TrustMetrics = () => {
   useEffect(() => {
     const fetchMetrics = async () => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000); // 3s timeout
+      const timer = setTimeout(() => controller.abort(), 3000);
       try {
         const res = await fetch(`${apiBase}/api/metrics`, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -112,7 +150,7 @@ const TrustMetrics = () => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             setVisible(true);
-            io.disconnect(); // run once
+            io.disconnect();
           }
         });
       },
@@ -139,44 +177,9 @@ const TrustMetrics = () => {
   return (
     <div className="mt-4 w-full" ref={containerRef}>
       <div className="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
-        {items.map((item, idx) => {
-          const Icon = iconMap[item.icon] || Star;
-          const showText = useCountUp(item.value, { duration: 2000, start: visible, delay: idx * 200 });
-          return (
-            <div
-              key={idx}
-              className={[
-                // base
-                'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center will-change-transform will-change-opacity',
-                // entrance fade + pop
-                visible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95',
-                // hover scale & glow (desktop)
-                'hover:scale-[1.02] hover:shadow-[0_10px_28px_rgba(214,182,97,0.25)] hover:border-yellow-300/60',
-              ].join(' ')}
-              style={{ transitionDelay: `${idx * 200}ms` }}
-              role="figure"
-              aria-label={`${item.label}: ${item.value}`}
-            >
-              <div
-                className={[
-                  'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
-                  'bg-gradient-to-br from-yellow-400 to-orange-500',
-                  // icon pulse loop
-                  visible ? 'tm-pulse-soft' : '',
-                ].join(' ')}
-                style={{ animationDelay: `${idx * 200 + 600}ms` }}
-              >
-                <Icon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
-              </div>
-              <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate" dir="ltr">
-                {showText}
-              </div>
-              <div className="text-[0.62rem] sm:text-sm text-gray-600 mt-0.5 sm:mt-1 truncate">
-                {item.label}
-              </div>
-            </div>
-          );
-        })}
+        {items.map((item, idx) => (
+          <MetricCard key={item.key || idx} item={item} idx={idx} visible={visible} />
+        ))}
       </div>
     </div>
   );
