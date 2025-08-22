@@ -151,7 +151,7 @@ const HomePage = () => {
     <div className="min-h-screen">
       <Header />
       {/* Hero Section */}
-      <section ref={heroRef} className="relative min-h-screen overflow-hidden flex items-center" style={{backgroundColor: '#FAF8F5'}}>
+      <section ref={heroRef} className="relative overflow-hidden flex items-start sm:items-center sm:min-h-screen" style={{backgroundColor: '#FAF8F5'}}>
         <div className="container mx-auto px-4 py-16">
           {/* Always two columns, no reordering */}
           <div className="grid grid-cols-2 items-center gap-6">
