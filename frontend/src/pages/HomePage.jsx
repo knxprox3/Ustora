@@ -152,7 +152,7 @@ const HomePage = () => {
       <Header />
       {/* Hero Section */}
       <section ref={heroRef} className="relative mt-3 sm:mt-0 overflow-hidden flex items-start sm:items-center sm:min-h-screen" style={{backgroundColor: '#FAF8F5'}}>
-        <div className="container mx-auto px-4 pt-12 pb-8 sm:py-16">
+        <div className="container mx-auto px-4 pt-14 pb-8 sm:py-16">
           {/* Always two columns, no reordering */}
           <div className="grid grid-cols-2 items-center gap-6">
             {/* Text Content - Right Side */}
