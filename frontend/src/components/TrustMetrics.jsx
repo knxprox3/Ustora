@@ -18,7 +18,7 @@ const defaultMetrics = {
   ],
 };
 
-// ---- Helpers for Count Up ----
+// ---- Helpers for Count Up & formatting ----
 function parseNumeric(targetStr) {
   if (!targetStr || typeof targetStr !== 'string') return { n: 0, decimals: 0, suffix: '' };
   const match = targetStr.trim().match(/^([0-9]+(?:\.[0-9]+)?)(.*)$/);
@@ -30,6 +30,22 @@ function parseNumeric(targetStr) {
 }
 
 function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
+
+// Normalize display like 85K+ -> +85K, 120K+ -> +120K
+function normalizePlusDisplay(numText, suffix) {
+  if (typeof numText !== 'string') numText = String(numText);
+  if (/^(K\+|M\+|B\+)$/.test(suffix)) {
+    const unit = suffix[0];
+    return `+${numText}${unit}`;
+  }
+  return `${numText}${suffix}`;
+}
+
+function buildZeroTextFor(targetStr) {
+  const { decimals, suffix } = parseNumeric(targetStr);
+  const zeroStr = decimals > 0 ? (0).toFixed(decimals) : '0';
+  return normalizePlusDisplay(zeroStr, suffix);
+}
 
 // Soft tick sound using Howler (low volume)
 const useTickSound = () => {
@@ -49,14 +65,15 @@ const useTickSound = () => {
 };
 
 // Count up hook that can call a callback each increment (for sound)
-function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTick } = {}) {
-  const [{ text }, setState] = useState(() => ({ text: targetStr }));
+function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTick, allowSound = true } = {}) {
+  const initialText = buildZeroTextFor(targetStr);
+  const [{ text }, setState] = useState(() => ({ text: initialText }));
   const rafRef = useRef();
   const lastIntRef = useRef(-1);
 
   useEffect(() => {
     if (!start) {
-      setState({ text: targetStr });
+      setState({ text: initialText });
       lastIntRef.current = -1;
       return;
     }
@@ -75,22 +92,23 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
 
       if (decimals === 0) {
         const curInt = Math.round(current);
-        if (curInt !== lastIntRef.current) {
+        if (allowSound && curInt !== lastIntRef.current) {
           lastIntRef.current = curInt;
           onTick && onTick();
         }
       } else {
-        if (onTick && Math.random() < 0.06) onTick();
+        if (allowSound && Math.random() < 0.06) onTick && onTick();
       }
 
-      const formatted = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
-      setState({ text: `${formatted}${suffix}` });
+      const numText = decimals > 0 ? current.toFixed(decimals) : Math.round(current).toString();
+      const formatted = normalizePlusDisplay(numText, suffix);
+      setState({ text: formatted });
       if (t < 1) rafRef.current = requestAnimationFrame(step);
     };
 
     rafRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [targetStr, duration, start, delay, onTick]);
+  }, [targetStr, duration, start, delay, onTick, allowSound, initialText]);
 
   return text;
 }
@@ -99,8 +117,9 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
 const MetricCard = ({ item, idx, visible }) => {
   const Icon = iconMap[item.icon] || Star;
   const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const allowMotion = !prefersReduced;
 
-  // Single controller for entrance + glow
+  // Controllers
   const cardCtrl = useAnimation();
   const iconCtrl = useAnimation();
 
@@ -111,53 +130,33 @@ const MetricCard = ({ item, idx, visible }) => {
   useEffect(() => {
     let mounted = true;
     const run = async () => {
-      if (!visible || prefersReduced) {
-        setReadyToCount(true);
-        return;
-      }
-      // Card entrance: slide up + fade in (stagger by idx)
-      await cardCtrl.start({
-        opacity: [0, 1],
-        y: [16, 0],
-        scale: [0.96, 1],
-        transition: { duration: 0.5, ease: 'easeOut', delay: idx * 0.2 },
-      });
-      // Icon pop: zoom-in + bounce
-      await iconCtrl.start({
-        scale: [0, 1.15, 1],
-        rotate: [0, 2, 0],
-        transition: { duration: 0.4, ease: 'easeOut' },
-      });
-      // Glow pulse across the same card controller
-      await cardCtrl.start({
-        boxShadow: [
-          '0 0 0 rgba(214,182,97,0)',
-          '0 10px 28px rgba(214,182,97,0.28)',
-          '0 0 0 rgba(214,182,97,0)'
-        ],
-        transition: { duration: 0.9, ease: 'easeInOut' }
-      });
+      if (!visible) return; // لا تبدأ قبل الظهور
+      if (!allowMotion) { setReadyToCount(true); return; }
+      await cardCtrl.start({ opacity: [0, 1], y: [16, 0], scale: [0.96, 1], transition: { duration: 0.5, ease: 'easeOut', delay: idx * 0.2 } });
+      await iconCtrl.start({ scale: [0, 1.15, 1], rotate: [0, 2, 0], transition: { duration: 0.4, ease: 'easeOut' } });
+      await cardCtrl.start({ boxShadow: ['0 0 0 rgba(214,182,97,0)', '0 10px 28px rgba(214,182,97,0.28)', '0 0 0 rgba(214,182,97,0)'], transition: { duration: 0.9, ease: 'easeInOut' } });
       if (mounted) setReadyToCount(true);
     };
     run();
     return () => { mounted = false; };
-  }, [visible, idx, prefersReduced, cardCtrl, iconCtrl]);
+  }, [visible, allowMotion, idx, cardCtrl, iconCtrl]);
 
   const countText = useCountUp(item.value, {
     duration: 2000,
-    start: readyToCount && !prefersReduced,
+    start: readyToCount, // يعمل العد حتى لو reduce-motion مفعّل
     delay: 0,
     onTick: playTick,
+    allowSound: allowMotion, // لا صوت عند reduce-motion
   });
 
   const numberVariants = {
     initial: { scale: 1 },
-    counting: { scale: [1, 1.06, 1], transition: { repeat: Infinity, repeatDelay: 0.2, duration: 0.6 } },
+    counting: allowMotion ? { scale: [1, 1.06, 1], transition: { repeat: Infinity, repeatDelay: 0.2, duration: 0.6 } } : { scale: 1 },
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16, scale: 0.96 }}
+      initial={allowMotion ? { opacity: 0, y: 16, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 }}
       animate={cardCtrl}
       className={[
         'group rounded-2xl border bg-white/70 backdrop-blur px-2 py-3 sm:px-3 sm:py-4 text-center',
@@ -169,7 +168,7 @@ const MetricCard = ({ item, idx, visible }) => {
       style={{ overflow: 'hidden' }}
     >
       <motion.div
-        initial={{ scale: 0 }}
+        initial={allowMotion ? { scale: 0 } : { scale: 1 }}
         animate={iconCtrl}
         className="mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-yellow-400 to-orange-500"
       >
@@ -180,11 +179,11 @@ const MetricCard = ({ item, idx, visible }) => {
         <motion.div
           variants={numberVariants}
           initial="initial"
-          animate={readyToCount && !prefersReduced ? 'counting' : 'initial'}
+          animate={readyToCount ? 'counting' : 'initial'}
           className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate"
           dir="ltr"
         >
-          {readyToCount ? countText : item.value}
+          {countText}
         </motion.div>
       </AnimatePresence>
 
@@ -222,18 +221,30 @@ const TrustMetrics = () => {
     fetchMetrics();
   }, []);
 
-  // Visibility observer
+  // Visibility observer + fallback في حال لم يعمل IO
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) { setVisible(true); return; }
     const io = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => { if (entry.isIntersecting) { setVisible(true); io.disconnect(); } });
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          io.disconnect();
+        }
+      });
     }, { threshold: 0.2 });
     io.observe(el);
-    return () => io.disconnect();
-  }, []);
+
+    const fallbackTimer = setTimeout(() => {
+      if (!visible) {
+        const rect = el.getBoundingClientRect();
+        const inView = rect.top < window.innerHeight && rect.bottom > 0;
+        if (inView) setVisible(true);
+      }
+    }, 3000);
+
+    return () => { io.disconnect(); clearTimeout(fallbackTimer); };
+  }, [visible]);
 
   if (loading) {
     return (
