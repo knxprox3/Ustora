@@ -130,11 +130,18 @@ const MetricCard = ({ item, idx, visible }) => {
   useEffect(() => {
     let mounted = true;
     const run = async () => {
-      if (!visible) return; // لا تبدأ قبل الظهور
+      if (!visible) return; // لا تبدأ قبل الظهور فعليًا
       if (!allowMotion) { setReadyToCount(true); return; }
+      // dwell صغير قبل البدء ليضمن استقرار الشاشة
+      await new Promise((r) => setTimeout(r, 250));
+      // Card entrance: slide up + fade in (stagger by idx)
       await cardCtrl.start({ opacity: [0, 1], y: [16, 0], scale: [0.96, 1], transition: { duration: 0.5, ease: 'easeOut', delay: idx * 0.2 } });
+      // Icon pop: zoom-in + bounce
       await iconCtrl.start({ scale: [0, 1.15, 1], rotate: [0, 2, 0], transition: { duration: 0.4, ease: 'easeOut' } });
+      // Glow pulse across card
       await cardCtrl.start({ boxShadow: ['0 0 0 rgba(214,182,97,0)', '0 10px 28px rgba(214,182,97,0.28)', '0 0 0 rgba(214,182,97,0)'], transition: { duration: 0.9, ease: 'easeInOut' } });
+      // dwell إضافي قبل العدّ ليكون الانتقال واضحًا
+      await new Promise((r) => setTimeout(r, 180));
       if (mounted) setReadyToCount(true);
     };
     run();
@@ -143,7 +150,7 @@ const MetricCard = ({ item, idx, visible }) => {
 
   const countText = useCountUp(item.value, {
     duration: 2000,
-    start: readyToCount, // يعمل العد حتى لو reduce-motion مفعّل
+    start: readyToCount, // العد يعمل دائمًا بعد الظهور، حتى مع تقليل الحركة (لكن بدون صوت/نبض)
     delay: 0,
     onTick: playTick,
     allowSound: allowMotion, // لا صوت عند reduce-motion
@@ -179,7 +186,7 @@ const MetricCard = ({ item, idx, visible }) => {
         <motion.div
           variants={numberVariants}
           initial="initial"
-          animate={readyToCount ? 'counting' : 'initial'}
+          animate={readyToCount && allowMotion ? 'counting' : 'initial'}
           className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate"
           dir="ltr"
         >
@@ -197,7 +204,8 @@ const MetricCard = ({ item, idx, visible }) => {
 const TrustMetrics = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [visible, setVisible] = useState(false);
+  const [inView, setInView] = useState(false); // ملاحظة الرؤية فقط
+  const [visible, setVisible] = useState(false); // يبدأ التسلسل بعد dwell
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -221,30 +229,37 @@ const TrustMetrics = () => {
     fetchMetrics();
   }, []);
 
-  // Visibility observer + fallback في حال لم يعمل IO
+  // Visibility observer (أشد صرامة) + rootMargin لتأخير التشغيل حتى يكون أغلب المكوّن ظاهرًا
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const io = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
-          setVisible(true);
-          io.disconnect();
+          setInView(true);
         }
       });
-    }, { threshold: 0.2 });
+    }, { threshold: 0.6, rootMargin: '0px 0px -25% 0px' });
     io.observe(el);
 
+    // Fallback بعد 3ث إذا كان داخل نافذة العرض
     const fallbackTimer = setTimeout(() => {
-      if (!visible) {
+      if (!inView) {
         const rect = el.getBoundingClientRect();
-        const inView = rect.top < window.innerHeight && rect.bottom > 0;
-        if (inView) setVisible(true);
+        const inside = rect.top < window.innerHeight * 0.9 && rect.bottom > window.innerHeight * 0.1;
+        if (inside) setInView(true);
       }
     }, 3000);
 
     return () => { io.disconnect(); clearTimeout(fallbackTimer); };
-  }, [visible]);
+  }, [inView]);
+
+  // Dwell بعد تحقق الرؤية قبل بدء التسلسل
+  useEffect(() => {
+    if (!inView || visible) return;
+    const t = setTimeout(() => setVisible(true), 250);
+    return () => clearTimeout(t);
+  }, [inView, visible]);
 
   if (loading) {
     return (
