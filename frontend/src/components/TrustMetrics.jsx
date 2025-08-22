@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Star, Zap, Download, Gauge } from 'lucide-react';
 import { motion, useAnimation, AnimatePresence } from 'framer-motion';
 import { Howl } from 'howler';
@@ -37,8 +37,7 @@ const useTickSound = () => {
   useEffect(() => {
     soundRef.current = new Howl({
       src: [
-        // Small inline beep base64 fallback if network blocked (1kHz 50ms)
-        'data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAAAEsAAACAAACAAAA//8AAP///wD///8A////AP///wD///8A////AP///wD///8A',
+        'data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQAAAnEAAB9AAAACAAACcQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
       ],
       volume: 0.06,
       preload: true,
@@ -74,7 +73,6 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
       const eased = easeOutQuad(t);
       const current = n * eased;
 
-      // For tick sound on integer boundaries only when decimals=0
       if (decimals === 0) {
         const curInt = Math.round(current);
         if (curInt !== lastIntRef.current) {
@@ -82,7 +80,6 @@ function useCountUp(targetStr, { duration = 2000, start = false, delay = 0, onTi
           onTick && onTick();
         }
       } else {
-        // For decimals, tick at ~20Hz max
         if (onTick && Math.random() < 0.06) onTick();
       }
 
@@ -103,14 +100,12 @@ const MetricCard = ({ item, idx, visible }) => {
   const Icon = iconMap[item.icon] || Star;
   const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Framer Motion controls
+  // Single controller for entrance + glow
   const cardCtrl = useAnimation();
   const iconCtrl = useAnimation();
-  const glowCtrl = useAnimation();
 
   const playTick = useTickSound();
 
-  // Number should start only after card + icon finished
   const [readyToCount, setReadyToCount] = useState(false);
 
   useEffect(() => {
@@ -133,20 +128,20 @@ const MetricCard = ({ item, idx, visible }) => {
         rotate: [0, 2, 0],
         transition: { duration: 0.4, ease: 'easeOut' },
       });
-      // Glow pulse across the card
-      await glowCtrl.start({
+      // Glow pulse across the same card controller
+      await cardCtrl.start({
         boxShadow: [
           '0 0 0 rgba(214,182,97,0)',
           '0 10px 28px rgba(214,182,97,0.28)',
-          '0 0 0 rgba(214,182,97,0)',
+          '0 0 0 rgba(214,182,97,0)'
         ],
-        transition: { duration: 0.9, ease: 'easeInOut' },
+        transition: { duration: 0.9, ease: 'easeInOut' }
       });
       if (mounted) setReadyToCount(true);
     };
     run();
     return () => { mounted = false; };
-  }, [visible, idx, prefersReduced, cardCtrl, iconCtrl, glowCtrl]);
+  }, [visible, idx, prefersReduced, cardCtrl, iconCtrl]);
 
   const countText = useCountUp(item.value, {
     duration: 2000,
@@ -155,7 +150,6 @@ const MetricCard = ({ item, idx, visible }) => {
     onTick: playTick,
   });
 
-  // Animated number scaling while counting (simple pulse when ready)
   const numberVariants = {
     initial: { scale: 1 },
     counting: { scale: [1, 1.06, 1], transition: { repeat: Infinity, repeatDelay: 0.2, duration: 0.6 } },
@@ -173,7 +167,6 @@ const MetricCard = ({ item, idx, visible }) => {
       role="figure"
       aria-label={`${item.label}: ${item.value}`}
       style={{ overflow: 'hidden' }}
-      animate={glowCtrl}
     >
       <motion.div
         initial={{ scale: 0 }}
