@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Star, Zap, Download, Gauge } from 'lucide-react';
 
 const iconMap = {
@@ -25,6 +25,8 @@ const defaultMetrics = {
 const TrustMetrics = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [visible, setVisible] = useState(false); // entrance animation flag
+  const containerRef = useRef(null);
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -47,12 +49,39 @@ const TrustMetrics = () => {
     fetchMetrics();
   }, []);
 
+  // Reveal on entering viewport (mobile-first)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Respect reduced motion users
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) {
+      setVisible(true);
+      return;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setVisible(true);
+            io.disconnect(); // run once
+          }
+        });
+      },
+      { threshold: 0.2 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   if (loading) {
     return (
-      <div className="mt-4 w-full">
+      <div className="mt-4 w-full" ref={containerRef}>
         <div className="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-16 rounded-xl bg-gray-200" />
+            <div key={i} className="h-16 rounded-2xl bg-gray-200" />
           ))}
         </div>
       </div>
@@ -62,16 +91,29 @@ const TrustMetrics = () => {
   const items = (data && Array.isArray(data.items) ? data.items : defaultMetrics.items).slice(0, 4);
 
   return (
-    <div className="mt-4 w-full">
+    <div className="mt-4 w-full" ref={containerRef}>
       <div className="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
         {items.map((item, idx) => {
           const Icon = iconMap[item.icon] || Star;
           return (
             <div
               key={idx}
-              className="group rounded-2xl border bg-white/70 backdrop-blur shadow-sm hover:shadow-md transition-all duration-300 px-2 py-3 sm:px-3 sm:py-4 text-center"
+              className={[
+                'group rounded-2xl border bg-white/70 backdrop-blur shadow-sm transition-all duration-500 ease-out px-2 py-3 sm:px-3 sm:py-4 text-center',
+                visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4',
+              ].join(' ')}
+              style={{ transitionDelay: `${idx * 120}ms` }}
+              role="figure"
+              aria-label={`${item.label}: ${item.value}`}
             >
-              <div className="mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center bg-gradient-to-br from-yellow-400 to-orange-500 text-white">
+              <div className={[
+                'mx-auto mb-1 sm:mb-2 w-6 h-6 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-white',
+                'bg-gradient-to-br from-yellow-400 to-orange-500',
+                'transform transition-transform duration-500 ease-out',
+                visible ? 'scale-100' : 'scale-90',
+              ].join(' ')}
+                style={{ transitionDelay: `${idx * 120 + 80}ms` }}
+              >
                 <Icon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
               </div>
               <div className="text-[0.8rem] sm:text-lg font-extrabold text-gray-900 leading-none truncate">
